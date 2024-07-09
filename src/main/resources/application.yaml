@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: authentication-helper
+
+
+
+authentication:
+  secret-key: 4d2e57a0d5a9c5e4670e19ab1a0e4f7e2f09f7d9e91c9a20d5e3c8b6d4e6f0c2
+  header-acronym: "Bearer "
+  redis:
+    host-name: localhost
+    port: 6379
+  open-urls: /auth/**,/v2/api-docs,/v3/api-docs, /authenticate/**
