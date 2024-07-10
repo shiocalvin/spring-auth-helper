@@ -12,3 +12,7 @@ authentication:
   open-urls: /auth/**,/v2/api-docs,/v3/api-docs, /authenticate/**
 server:
   port: 8081
+logging:
+  level:
+    # show-all logs in spring-sec
+    org.springframework.security: TRACE

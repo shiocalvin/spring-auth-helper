@@ -23,27 +23,38 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.http.HttpStatus;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationServiceException;
+import org.springframework.security.authentication.ProviderManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.file.attribute.UserPrincipal;
 import java.security.Key;
+import java.security.Principal;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.Function;
 import java.util.logging.Logger;
 
+import static java.lang.Boolean.TRUE;
 import static org.springframework.http.HttpHeaders.AUTHORIZATION;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
@@ -74,9 +85,18 @@ class SecurityConfiguration {
     private final JwtFilter jwtFilter;
     @Value("${authentication.open-urls}")
     private String[] urlsPublic;
+    private final UserDetailsService userDetailsService;
 
-    SecurityConfiguration(JwtFilter jwtFilter) {
+    SecurityConfiguration(JwtFilter jwtFilter, UserDetailsService userDetailsService) {
         this.jwtFilter = jwtFilter;
+        this.userDetailsService = userDetailsService;
+    }
+
+    @Bean
+    AuthenticationManager authenticationManager() {
+        DaoAuthenticationProvider daoAuthenticationProvider = new DaoAuthenticationProvider();
+        daoAuthenticationProvider.setUserDetailsService(userDetailsService);
+        return new ProviderManager(daoAuthenticationProvider);
     }
 
     // web-security config
@@ -93,6 +113,7 @@ class SecurityConfiguration {
                             .anyRequest()
                             .authenticated();
                 })
+//                .httpBasic(Customizer.withDefaults())
                 // stateless authentication
                 .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
                 // pass auth filter before
@@ -134,6 +155,7 @@ class JwtFilter extends OncePerRequestFilter {
             String username = jwtService.extractUserFromToken(token);
             logger.info("Username From Auth Header Extracted: " + username);
             // check username could be extracted from the token and
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
             if (username != null & SecurityContextHolder.getContext().getAuthentication() == null) {
                 // means user-name found and no authentication context was found
                 logger.info("Request Has No Authentication Context");
@@ -149,6 +171,8 @@ class JwtFilter extends OncePerRequestFilter {
                             username,
                             permissions.stream().map(SimpleGrantedAuthority::new).toList()
                     );
+                    // set authenticated
+                    userAuthenticationToken.setAuthenticated(TRUE);
                     // set user authentication context
                     SecurityContextHolder.getContext().setAuthentication(userAuthenticationToken);
                     logger.info("Request Has Been Validated And Authentication Context Has Been Added");
@@ -221,7 +245,7 @@ class RedisService {
         // initiate redis template
         RedisTemplate<String, RedisUserPerms> authRedisTemplate = getAuthRedisTemplate();
         RedisUserPerms redisUserPerms = authRedisTemplate.opsForValue().get(username);
-        if (redisUserPerms !=  null) {
+        if (redisUserPerms != null) {
             return new HashSet<>(redisUserPerms.permissions);
         } else {
             return new HashSet<>();
@@ -253,6 +277,47 @@ class RedisService {
             String username,
             List<String> permissions
     ) {
+    }
+}
+
+@Service
+class HelperUserDetailsService implements UserDetailsService {
+    private final RedisService redisService;
+
+    HelperUserDetailsService(RedisService redisService) {
+        this.redisService = redisService;
+    }
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        // find user-details from redis and make user details
+        Set<String> userPermissionFromRedis = redisService.getUserPermissionFromRedis(username);
+        return new userRecord(username, userPermissionFromRedis.stream().toList());
+    }
+
+    record userRecord(String username, List<String> permissions) implements UserDetails, Principal {
+
+        @Override
+        public Collection<? extends GrantedAuthority> getAuthorities() {
+            List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+            permissions.forEach(p -> authorities.add(new SimpleGrantedAuthority(p)));
+            return authorities;
+        }
+
+        @Override
+        public String getPassword() {
+            return "";
+        }
+
+        @Override
+        public String getUsername() {
+            return username;
+        }
+
+        @Override
+        public String getName() {
+            return username;
+        }
     }
 }
 
