@@ -1,5 +1,6 @@
 package com.medjay.authenticatehelper;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
@@ -17,6 +18,7 @@ import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.http.HttpStatus;
 import org.springframework.lang.NonNull;
@@ -38,9 +40,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.security.Key;
 import java.time.LocalDateTime;
-import java.util.Collection;
-import java.util.Date;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Function;
 import java.util.logging.Logger;
 
@@ -87,11 +87,11 @@ class SecurityConfiguration {
                 .csrf(AbstractHttpConfigurer::disable)
                 // add public urls
                 .authorizeHttpRequests(req -> {
-                   req.requestMatchers(urlsPublic)
-                           .permitAll()
-                           // reset authentication
-                           .anyRequest()
-                           .authenticated();
+                    req.requestMatchers(urlsPublic)
+                            .permitAll()
+                            // reset authentication
+                            .anyRequest()
+                            .authenticated();
                 })
                 // stateless authentication
                 .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
@@ -126,7 +126,7 @@ class JwtFilter extends OncePerRequestFilter {
         final String authorizationHeader = request.getHeader(AUTHORIZATION);
         logger.info("Authorization Header: " + authorizationHeader);
         // check if auth header is present and start with agreed header acronym
-        if (authorizationHeader != null && !authorizationHeader.startsWith(headerAcronym)) {
+        if (authorizationHeader != null && authorizationHeader.startsWith(headerAcronym)) {
             logger.info("Valid Authorization Header Format: " + authorizationHeader);
             // get token without header
             String token = authorizationHeader.substring(headerAcronym.length()).trim();
@@ -178,7 +178,8 @@ class JwtService {
 
     // check if token has expired
     private boolean isTokenExpired(String token) {
-        return extractExpirationDateFromToken(token).before(new Date());
+        // invert the dates checks
+        return !extractExpirationDateFromToken(token).before(new Date());
     }
 
     // get token expiry date
@@ -215,25 +216,26 @@ class RedisService {
     public String redisHost;
     @Value("${authentication.redis.port}")
     public int redisPort;
-
     // get permissions
     public Set<String> getUserPermissionFromRedis(String username) {
-        RedisTemplate<String, Object> redisTemplate = getRedisTemplate();
-        Object object = redisTemplate.opsForValue().get(username);
-        if (object instanceof UserDataRedisPerms details) {
-            // details found
-            return details.permissions();
+        // initiate redis template
+        RedisTemplate<String, RedisUserPerms> authRedisTemplate = getAuthRedisTemplate();
+        RedisUserPerms redisUserPerms = authRedisTemplate.opsForValue().get(username);
+        if (redisUserPerms !=  null) {
+            return new HashSet<>(redisUserPerms.permissions);
         } else {
-            // TODO throw error?
-            throw new AuthenticationServiceException(username);
+            return new HashSet<>();
         }
     }
 
-    private RedisTemplate<String, Object> getRedisTemplate() {
-        RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
+
+    private RedisTemplate<String, RedisUserPerms> getAuthRedisTemplate() {
+        Jackson2JsonRedisSerializer<RedisUserPerms> jackson2JsonRedisSerializer = new Jackson2JsonRedisSerializer<>(RedisUserPerms.class);
+        RedisTemplate<String, RedisUserPerms> redisTemplate = new RedisTemplate<>();
         redisTemplate.setConnectionFactory(getLettuceConnectionFactory());
         redisTemplate.setKeySerializer(new StringRedisSerializer());
-        redisTemplate.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+        redisTemplate.setValueSerializer(jackson2JsonRedisSerializer);
+        redisTemplate.afterPropertiesSet();
         return redisTemplate;
     }
 
@@ -241,7 +243,16 @@ class RedisService {
         RedisStandaloneConfiguration redisStandaloneConfiguration = new RedisStandaloneConfiguration();
         redisStandaloneConfiguration.setHostName(redisHost);
         redisStandaloneConfiguration.setPort(redisPort);
-        return new LettuceConnectionFactory(redisStandaloneConfiguration);
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(redisStandaloneConfiguration);
+        // connection factory need to be initialized?
+        connectionFactory.start();
+        return connectionFactory;
+    }
+
+    record RedisUserPerms(
+            String username,
+            List<String> permissions
+    ) {
     }
 }
 
@@ -266,12 +277,5 @@ class UserAuthenticationToken extends AbstractAuthenticationToken {
     }
 }
 
-record UserDataRedisPerms(
-        String userName,
-        String fullName,
-        Set<String> permissions,
-        int failedAttempts,
-        LocalDateTime lastTry,
-        LocalDateTime lastLogin
-) {
-}
+
+// TODO exception handling --> ExpiredJwtException for token expiry
