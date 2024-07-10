@@ -1,6 +1,5 @@
 package com.medjay.authenticatehelper;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
@@ -17,14 +16,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.http.HttpStatus;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.Customizer;
@@ -35,21 +32,14 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.nio.file.attribute.UserPrincipal;
 import java.security.Key;
-import java.security.Principal;
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.Function;
 import java.util.logging.Logger;
@@ -85,17 +75,13 @@ class SecurityConfiguration {
     private final JwtFilter jwtFilter;
     @Value("${authentication.open-urls}")
     private String[] urlsPublic;
-    private final UserDetailsService userDetailsService;
-
-    SecurityConfiguration(JwtFilter jwtFilter, UserDetailsService userDetailsService) {
+    SecurityConfiguration(JwtFilter jwtFilter) {
         this.jwtFilter = jwtFilter;
-        this.userDetailsService = userDetailsService;
     }
 
     @Bean
     AuthenticationManager authenticationManager() {
         DaoAuthenticationProvider daoAuthenticationProvider = new DaoAuthenticationProvider();
-        daoAuthenticationProvider.setUserDetailsService(userDetailsService);
         return new ProviderManager(daoAuthenticationProvider);
     }
 
@@ -277,47 +263,6 @@ class RedisService {
             String username,
             List<String> permissions
     ) {
-    }
-}
-
-@Service
-class HelperUserDetailsService implements UserDetailsService {
-    private final RedisService redisService;
-
-    HelperUserDetailsService(RedisService redisService) {
-        this.redisService = redisService;
-    }
-
-    @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        // find user-details from redis and make user details
-        Set<String> userPermissionFromRedis = redisService.getUserPermissionFromRedis(username);
-        return new userRecord(username, userPermissionFromRedis.stream().toList());
-    }
-
-    record userRecord(String username, List<String> permissions) implements UserDetails, Principal {
-
-        @Override
-        public Collection<? extends GrantedAuthority> getAuthorities() {
-            List<SimpleGrantedAuthority> authorities = new ArrayList<>();
-            permissions.forEach(p -> authorities.add(new SimpleGrantedAuthority(p)));
-            return authorities;
-        }
-
-        @Override
-        public String getPassword() {
-            return "";
-        }
-
-        @Override
-        public String getUsername() {
-            return username;
-        }
-
-        @Override
-        public String getName() {
-            return username;
-        }
     }
 }
 
