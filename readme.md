@@ -74,7 +74,7 @@ Ensure the following properties are set in `application.properties`:
 authentication.secret-key=your-secret-key
 
 # Header acronym for JWT
-authentication.header-acronym=Bearer 
+authentication.header-acronym=Bearer
 
 # Public URLs that do not require authentication
 authentication.open-urls=/public/**
